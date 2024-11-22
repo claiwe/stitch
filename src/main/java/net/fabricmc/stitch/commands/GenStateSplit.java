@@ -44,11 +44,30 @@ public class GenStateSplit extends GenState
 
         tmp.mkdirs();
 
-        BufferedWriter cw = new BufferedWriter(new FileWriter(client));
-        BufferedWriter sw = new BufferedWriter(new FileWriter(server));
+        generate(client, server, storageClient, storageServer, storageClientOld, storageServerOld);
 
-        cw.write("v1\tofficial\t" + targetNamespace + "\n");
-        sw.write("v1\tofficial\t" + targetNamespace + "\n");
+        try {
+            new CommandCombineTiny().run(new String[] {
+                client.getAbsolutePath(),
+                server.getAbsolutePath(),
+                file.getAbsolutePath()
+            });
+        } catch (Exception e) {
+            throw new IOException(e);
+        }
+        
+
+        client.delete();
+        server.delete();
+        tmp.delete();
+    }
+
+    public void generate(File clientFile, File serverFile, Classpath storageClient, Classpath storageServer, Classpath storageClientOld, Classpath storageServerOld) throws IOException {
+        BufferedWriter cw = (clientFile == null) ? null : new BufferedWriter(new FileWriter(clientFile));
+        BufferedWriter sw = (serverFile == null) ? null : new BufferedWriter(new FileWriter(serverFile));
+
+        if (cw != null) cw.write("v1\tofficial\t" + targetNamespace + "\n");
+        if (sw != null) sw.write("v1\tofficial\t" + targetNamespace + "\n");
 
         // hack to make sure we don't write them multiple times
         Set<String> serverClasses = new HashSet<>();
@@ -78,23 +97,8 @@ public class GenStateSplit extends GenState
 
         serverClasses.clear();
 
-        cw.close();
-        sw.close();
-
-        try {
-            new CommandCombineTiny().run(new String[] {
-                client.getAbsolutePath(),
-                server.getAbsolutePath(),
-                file.getAbsolutePath()
-            });
-        } catch (Exception e) {
-            throw new IOException(e);
-        }
-        
-
-        client.delete();
-        server.delete();
-        tmp.delete();
+        if (cw != null) cw.close();
+        if (sw != null) sw.close();
     }
 
     private String next(AbstractJarEntry centry, AbstractJarEntry sentry, String prefix) {
@@ -675,7 +679,10 @@ public class GenStateSplit extends GenState
         File client = null;
         File server = null;
 
-        if (clientMappings != null) {
+        boolean splitClient = clientMappings != null && needsSplitting(clientMappings);
+        boolean splitServer = serverMappings != null && needsSplitting(serverMappings);
+
+        if (splitClient) {
             tmp = new File(clientMappings.getParentFile(), ".tmp");
             client = new File(tmp, "client.tiny");
 
@@ -690,8 +697,10 @@ public class GenStateSplit extends GenState
             } catch (Exception e) {
                 throw new IOException(e);
             }
+        } else {
+            client = clientMappings;
         }
-        if (serverMappings != null) {
+        if (splitServer) {
             tmp = new File(serverMappings.getParentFile(), ".tmp");
             server = new File(tmp, "server.tiny");
 
@@ -706,15 +715,17 @@ public class GenStateSplit extends GenState
             } catch (Exception e) {
                 throw new IOException(e);
             }
+        } else {
+            server = serverMappings;
         }
 
         prepareUpdateFromSplitInternal(client, server, clientMatches, serverMatches, clientServerMatches, invertClientMatches, invertServerMatches, invertClientServerMatches);
 
-        if (clientMappings != null) {
+        if (splitClient) {
             client.delete();
             tmp.delete();
         }
-        if (serverMappings != null) {
+        if (splitServer) {
             server.delete();
             tmp.delete();
         }
@@ -760,5 +771,18 @@ public class GenStateSplit extends GenState
                 MatcherUtil.read(reader, invertClientServerMatches, clientToServer::addClass, clientToServer::addField, clientToServer::addMethod);
             }
         }
+    }
+
+    private boolean needsSplitting(File mappings) {
+        try (BufferedReader br = new BufferedReader(new FileReader(mappings))) {
+            String header = br.readLine();
+
+            if (header != null) {
+                return !header.startsWith("v1\tofficial");
+            }
+        } catch (IOException e) {
+        }
+
+        return false;
     }
 }
